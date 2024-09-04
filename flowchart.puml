@@ -1,0 +1,42 @@
+@startuml
+start
+
+:Show Critical Areas (CPU: 10%, Memory: 70%);
+if (CPU Metrics Analysis?) then (Yes)
+  :Analyze CPU Usage;
+  if (High CPU for specific API?) then (Yes)
+    :Show Top API Calls;
+    :Drill down into Performance Details;
+    if (Optimize Code?) then (Yes)
+      :Suggest Code Optimizations;
+      :Create Pull Request;
+      :PR Created;
+    endif
+    if (Move to Memory Metrics?) then (Yes)
+      :Analyze Memory Usage;
+    endif
+  else (No)
+    :Move to Memory Metrics Analysis;
+  endif
+else (No)
+  :Memory Metrics Analysis;
+endif
+
+:Analyze Memory Usage;
+if (Memory Usage High but not Critical?) then (Yes)
+  :Provide Recommendations;
+  if (Apply Recommendations?) then (Yes)
+    :Apply Recommendations;
+    :Setup Monitoring?;
+  endif
+else (No)
+  :Move to Final Actions;
+endif
+
+if (Setup Monitoring?) then (Yes)
+  :Setup Continuous Monitoring;
+endif
+
+:End Conversation;
+stop
+@enduml
