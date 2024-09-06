@@ -1,42 +1,164 @@
-@startuml
-start
+import os
+from typing import Dict, List, Annotated, TypedDict
+from langgraph.graph import Graph, StateGraph
+from langgraph.prebuilt import ToolExecutor
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import create_openai_functions_agent
+from langchain_core.messages import HumanMessage
 
-:Show Critical Areas (CPU: 10%, Memory: 70%);
-if (CPU Metrics Analysis?) then (Yes)
-  :Analyze CPU Usage;
-  if (High CPU for specific API?) then (Yes)
-    :Show Top API Calls;
-    :Drill down into Performance Details;
-    if (Optimize Code?) then (Yes)
-      :Suggest Code Optimizations;
-      :Create Pull Request;
-      :PR Created;
-    endif
-    if (Move to Memory Metrics?) then (Yes)
-      :Analyze Memory Usage;
-    endif
-  else (No)
-    :Move to Memory Metrics Analysis;
-  endif
-else (No)
-  :Memory Metrics Analysis;
-endif
+# Ensure you have set your OpenAI API key
+os.environ["OPENAI_API_KEY"] = "your-api-key-here"
 
-:Analyze Memory Usage;
-if (Memory Usage High but not Critical?) then (Yes)
-  :Provide Recommendations;
-  if (Apply Recommendations?) then (Yes)
-    :Apply Recommendations;
-    :Setup Monitoring?;
-  endif
-else (No)
-  :Move to Final Actions;
-endif
+# Define the state
+class State(TypedDict):
+    messages: List[str]
+    current_node: str
+    trace_graph: Dict
+    flagged_code: List[str]
+    flagged_resources: List[str]
+    user_input: str
 
-if (Setup Monitoring?) then (Yes)
-  :Setup Continuous Monitoring;
-endif
+# Tools
+@tool
+def analyze_code_performance(trace_graph: Dict) -> List[str]:
+    """Analyze code performance and return a list of functions to optimize."""
+    # Implement code performance analysis logic here
+    return ["function_a", "function_b"]
 
-:End Conversation;
-stop
-@enduml
+@tool
+def analyze_resource_availability(trace_graph: Dict) -> List[str]:
+    """Analyze resource availability and return a list of problematic resources."""
+    # Implement resource availability analysis logic here
+    return ["database", "external_api"]
+
+@tool
+def optimize_code(function: str) -> str:
+    """Optimize the given function."""
+    # Implement code optimization logic here
+    return f"Optimized {function}"
+
+@tool
+def investigate_resource(resource: str) -> str:
+    """Investigate issues with the given resource."""
+    # Implement resource investigation logic here
+    return f"Investigated {resource}"
+
+# LLM setup
+llm = ChatOpenAI(model_name="gpt-3.5-turbo")
+
+# Router Agent
+router_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a router for an API performance diagnosis system. Based on the user's input, decide whether to perform code analysis or resource analysis."),
+    ("human", "User input: {user_input}\nDecide whether to perform 'code_analysis' or 'resource_analysis'.")
+])
+
+router_agent = create_openai_functions_agent(llm, [], router_prompt)
+router_executor = ToolExecutor(router_agent)
+
+# Other LLM-based Agents (code_analysis_agent, resource_analysis_agent, optimization_agent, investigation_agent) remain the same as in the previous implementation
+
+# Nodes
+def router(state: State) -> Dict:
+    result = router_executor.invoke({"user_input": state["user_input"]})
+    decision = result["output"].strip().lower()
+    if "code" in decision:
+        return {"current_node": "code_analysis"}
+    elif "resource" in decision:
+        return {"current_node": "resource_analysis"}
+    else:
+        return {"current_node": "human_decision", "messages": state["messages"] + ["Couldn't determine analysis type. Please choose manually."]}
+
+def code_analysis(state: State) -> Dict:
+    result = code_analysis_executor.invoke({"trace_graph": state["trace_graph"]})
+    flagged_code = result["output"]
+    return {
+        "messages": state["messages"] + [f"Flagged code: {flagged_code}"],
+        "flagged_code": flagged_code,
+        "current_node": "human_decision"
+    }
+
+def resource_analysis(state: State) -> Dict:
+    result = resource_analysis_executor.invoke({"trace_graph": state["trace_graph"]})
+    flagged_resources = result["output"]
+    return {
+        "messages": state["messages"] + [f"Flagged resources: {flagged_resources}"],
+        "flagged_resources": flagged_resources,
+        "current_node": "human_decision"
+    }
+
+def human_decision(state: State) -> Dict:
+    print("\n".join(state["messages"]))
+    options = ["Optimize code", "Investigate resource", "New analysis", "End diagnosis"]
+    for i, option in enumerate(options, 1):
+        print(f"{i}. {option}")
+    choice = input("Choose an action (enter the number): ")
+    choice = options[int(choice) - 1]
+    if choice == "New analysis":
+        user_input = input("What type of analysis would you like to perform? ")
+        return {"messages": state["messages"] + [f"User chose: {choice}"], "current_node": "router", "user_input": user_input}
+    return {"messages": state["messages"] + [f"User chose: {choice}"], "current_node": choice.lower().replace(" ", "_")}
+
+def optimize_flagged_code(state: State) -> Dict:
+    if state["flagged_code"]:
+        function = state["flagged_code"].pop(0)
+        result = optimization_executor.invoke({"function": function})
+        return {"messages": state["messages"] + [result["output"]], "current_node": "human_decision"}
+    return {"messages": state["messages"] + ["No more code to optimize"], "current_node": "human_decision"}
+
+def investigate_flagged_resource(state: State) -> Dict:
+    if state["flagged_resources"]:
+        resource = state["flagged_resources"].pop(0)
+        result = investigation_executor.invoke({"resource": resource})
+        return {"messages": state["messages"] + [result["output"]], "current_node": "human_decision"}
+    return {"messages": state["messages"] + ["No more resources to investigate"], "current_node": "human_decision"}
+
+# Create the graph
+workflow = StateGraph(State)
+
+# Add nodes
+workflow.add_node("router", router)
+workflow.add_node("code_analysis", code_analysis)
+workflow.add_node("resource_analysis", resource_analysis)
+workflow.add_node("human_decision", human_decision)
+workflow.add_node("optimize_code", optimize_flagged_code)
+workflow.add_node("investigate_resource", investigate_flagged_resource)
+
+# Add edges
+workflow.add_edge("router", "code_analysis")
+workflow.add_edge("router", "resource_analysis")
+workflow.add_edge("router", "human_decision")
+workflow.add_edge("code_analysis", "human_decision")
+workflow.add_edge("resource_analysis", "human_decision")
+workflow.add_edge("human_decision", "router")
+workflow.add_edge("human_decision", "optimize_code")
+workflow.add_edge("human_decision", "investigate_resource")
+workflow.add_edge("optimize_code", "human_decision")
+workflow.add_edge("investigate_resource", "human_decision")
+
+# Set entry point
+workflow.set_entry_point("router")
+
+# Compile the graph
+app = workflow.compile()
+
+# Run the graph
+initial_state = {
+    "messages": [],
+    "current_node": "router",
+    "trace_graph": {},  # Your actual trace graph data
+    "flagged_code": [],
+    "flagged_resources": [],
+    "user_input": input("What type of analysis would you like to perform? ")
+}
+
+for output in app.stream(initial_state):
+    if output['current_node'] == "end_diagnosis":
+        break
+    # Print only if there are new messages
+    if output.get('messages') and output['messages'] != initial_state['messages']:
+        print("\n".join(output['messages']))
+    initial_state = output  # Update the state for the next iteration
+
+print("Diagnosis complete")
