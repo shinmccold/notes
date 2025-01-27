@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Timeline with Visible Axes</title>
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+  <style>
+    #chart { max-width: 1200px; margin: 20px auto; }
+    .tooltip { padding: 8px; background: #fff; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+
+  <script>
+    // Sample Data
+    const sessions = {
+      "session-1": [{
+        name: "AI",
+        contributorStartTime: new Date("2025-01-24T10:00:00").getTime(),
+        contributorEndTime: new Date("2025-01-24T10:30:00").getTime(),
+        resource: { touchpoint: "Checkout" }
+      }, {
+        name: "Human",
+        contributorStartTime: new Date("2025-01-24T10:05:00").getTime(),
+        contributorEndTime: new Date("2025-01-24T10:15:00").getTime(),
+        resource: { touchpoint: "Support" }
+      }],
+      "session-2": [{
+        name: "UpdateDomain",
+        contributorStartTime: new Date("2025-01-26T09:00:00").getTime(),
+        contributorEndTime: new Date("2025-01-26T09:45:00").getTime(),
+        resource: { touchpoint: "Checkout" }
+      }, {
+        name: "AI",
+        contributorStartTime: new Date("2025-01-26T10:00:00").getTime(),
+        contributorEndTime: new Date("2025-01-26T10:30:00").getTime(),
+        resource: { touchpoint: "Dashboard" }
+      }]
+    };
+
+    // Configuration
+    const GAP_WIDTH = 100; // Fixed gap width
+    let xOffset = 0;
+    let allSpans = [];
+    const sessionPositions = [];
+
+    // Process data
+    Object.keys(sessions).forEach((uuid, index) => {
+      const session = sessions[uuid];
+      const sessionStart = Math.min(...session.map(s => s.contributorStartTime));
+      const sessionEnd = Math.max(...session.map(s => s.contributorEndTime));
+      
+      // Store session position
+      sessionPositions.push({
+        visualStart: xOffset,
+        visualEnd: xOffset + (sessionEnd - sessionStart),
+        actualStart: sessionStart,
+        actualEnd: sessionEnd
+      });
+
+      // Map spans
+      session.forEach(span => {
+        allSpans.push({
+          x: span.resource.touchpoint,
+          y: [
+            xOffset + (span.contributorStartTime - sessionStart),
+            xOffset + (span.contributorEndTime - sessionStart)
+          ],
+          name: span.name,
+          actualStart: span.contributorStartTime,
+          actualEnd: span.contributorEndTime
+        });
+      });
+
+      // Add gap
+      if (index < Object.keys(sessions).length - 1) {
+        xOffset += (sessionEnd - sessionStart) + GAP_WIDTH;
+      }
+    });
+
+    // Create series and categories
+    const categories = [...new Set(allSpans.map(span => span.x))];
+    const series = ["AI", "Human", "UpdateDomain"].map(name => ({
+      name,
+      data: allSpans.filter(span => span.name === name)
+    }));
+
+    // Create gap annotations
+    const gapAnnotations = [];
+    for (let i = 0; i < sessionPositions.length - 1; i++) {
+      gapAnnotations.push({
+        x: sessionPositions[i].visualEnd,
+        x2: sessionPositions[i].visualEnd + GAP_WIDTH,
+        fillColor: "#F0F0F0",
+        label: {
+          text: "2-Day Gap",
+          style: { color: "#666", fontSize: "12px" }
+        }
+      });
+    }
+
+    // Chart Configuration
+    const options = {
+      chart: {
+        type: "rangeBar",
+        height: 400,
+        toolbar: { show: true }
+      },
+      series,
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          barHeight: "70%",
+          rangeBarGroupRows: true
+        }
+      },
+      xaxis: {
+        type: "datetime",
+        labels: {
+          formatter: (val) => {
+            // Convert visual position to actual time
+            const session = sessionPositions.find(s => 
+              val >= s.visualStart && val <= s.visualEnd
+            );
+            if (session) {
+              const actualTime = session.actualStart + (val - session.visualStart);
+              return new Date(actualTime).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit"
+              });
+            }
+            return "";
+          },
+          style: {
+            colors: "#666",
+            fontSize: "12px"
+          }
+        },
+        axisTicks: {
+          show: true
+        }
+      },
+      yaxis: {
+        categories,
+        labels: {
+          style: {
+            colors: "#666",
+            fontSize: "14px",
+            fontWeight: 600
+          }
+        },
+        title: {
+          text: "Touchpoints",
+          style: {
+            color: "#666",
+            fontSize: "16px"
+          }
+        }
+      },
+      annotations: { xaxis: gapAnnotations },
+      tooltip: {
+        custom: ({ seriesIndex, dataPointIndex }) => {
+          const span = series[seriesIndex].data[dataPointIndex];
+          return `
+            <div class="tooltip">
+              <strong>${span.name}</strong><br>
+              ${new Date(span.actualStart).toLocaleString()} - 
+              ${new Date(span.actualEnd).toLocaleString()}<br>
+              Touchpoint: ${span.x}
+            </div>
+          `;
+        }
+      },
+      legend: {
+        show: true,
+        position: "top",
+        fontSize: "14px",
+        markers: {
+          width: 12,
+          height: 12,
+          radius: 4
+        }
+      },
+      dataLabels: {
+        enabled: true,
+        formatter: function(val, opts) {
+          const duration = (val[1] - val[0]) / 1000 / 60;
+          return `${Math.round(duration)}m`;
+        },
+        style: {
+          fontSize: "12px",
+          colors: ["#fff"]
+        }
+      }
+    };
+
+    // Render Chart
+    const chart = new ApexCharts(document.querySelector("#chart"), options);
+    chart.render();
+  </script>
+</body>
+</html>
